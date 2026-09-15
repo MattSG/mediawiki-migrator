@@ -16,3 +16,13 @@ Post-migration, upload the assets after importing the pages. `Upload-MediaWikiAs
 ```powershell
 & $php maintenance/refreshLinks.php
 ```
+
+To organise an already-imported local wiki under the knowledge namespace:
+
+```powershell
+.Post-Migrate-WholesaleSupport.ps1 -ApiUrl http://localhost:8090/api.php `
+  -Username LocalAdmin -Password $password `
+  -LocalSettingsPath C:\wiki\stack\www\LocalSettings.php
+```
+
+This moves namespace-0 pages only, keeps files/templates/system namespaces unchanged, removes old-title redirects, rewrites known internal links, and makes the root Main Page link to `Wholesale Support:Main Page`.
