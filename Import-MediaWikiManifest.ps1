@@ -1,5 +1,6 @@
 [CmdletBinding(SupportsShouldProcess)]param([Parameter(Mandatory)][string]$ApiUrl,[Parameter(Mandatory)][string]$Manifest,[string]$Username=$env:MEDIAWIKI_USERNAME,[string]$Password=$env:MEDIAWIKI_PASSWORD,[switch]$AddSemanticBreadcrumbs,[string]$BreadcrumbProperty='Has parent page')
 $ErrorActionPreference='Stop'; $m=Get-Content $Manifest -Raw|ConvertFrom-Json
+if($PSVersionTable.PSVersion.Major -lt 7){throw 'Run Import-MediaWikiManifest.ps1 with PowerShell 7 (pwsh) to preserve UTF-8 content.'}
 $s=New-Object Microsoft.PowerShell.Commands.WebRequestSession
 function Api([hashtable]$p,[switch]$Post){$p['format']='json';if($Post){Invoke-RestMethod $ApiUrl -Method Post -Body $p -WebSession $s}else{Invoke-RestMethod "${ApiUrl}?$(( $p.GetEnumerator()|%{'{0}={1}'-f $_.Key,[uri]::EscapeDataString([string]$_.Value)})-join'&')" -WebSession $s}}
 if($Username -or $Password){if(-not($Username -and $Password)){throw 'Username and Password must both be supplied'};$lt=(Api @{action='query';meta='tokens';type='login'}).query.tokens.logintoken;$login=Api @{action='login';lgname=$Username;lgpassword=$Password;lgtoken=$lt} -Post;if($login.login.result -ne 'Success'){throw 'MediaWiki login failed'}}
