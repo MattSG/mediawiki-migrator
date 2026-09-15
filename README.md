@@ -10,3 +10,9 @@ $env:MEDIAWIKI_PASSWORD = 'bot-password'
 ```
 
 Credentials are optional for anonymously readable wikis. Use `namespace-mapper.html` to edit the exported mapping before import. Uploads are preserved under `assets/`; office files are listed for review.
+
+Post-migration, upload the assets after importing the pages. `Upload-MediaWikiAssets.ps1` purges every imported page after the upload so cached broken-file links are reparsed. Then refresh the local links table:
+
+```powershell
+& $php maintenance/refreshLinks.php
+```
