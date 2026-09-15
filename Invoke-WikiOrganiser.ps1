@@ -1,0 +1,10 @@
+[CmdletBinding()]
+param([Parameter(Mandatory)][string]$Manifest,[string]$Decisions='wiki-organisation.json',[switch]$Interactive,[switch]$WhatIf)
+$ErrorActionPreference='Stop';$m=Get-Content $Manifest -Raw|ConvertFrom-Json
+$state=if(Test-Path $Decisions){Get-Content $Decisions -Raw|ConvertFrom-Json}else{[pscustomobject]@{decisions=@();questions=@()}}
+$done=@{};foreach($d in @($state.decisions)){$done[[string]$d.pageid]=$d}
+function Save-State{$state|ConvertTo-Json -Depth 20|Set-Content $Decisions -Encoding utf8}
+foreach($p in $m.pages){$key=[string]$p.pageid;if($done.ContainsKey($key)){continue};$summary=($p.source -replace '\s+',' ').Trim();if($summary.Length -gt 180){$summary=$summary.Substring(0,180)+'...'}
+  if($Interactive){Write-Host "`n[$($p.pageid)] $($p.title) (ns $($p.ns))`n$summary"; $ns=Read-Host 'Destination namespace name (blank = keep)';$parent=Read-Host 'Parent page/path (blank = none; e.g. Policies/HR)';$title=Read-Host 'Destination title (blank = keep)';$note=Read-Host 'Decision note (optional)'}else{$ns='';$parent='';$title='';$note=''}
+  $d=[pscustomobject]@{pageid=$p.pageid;source_title=$p.title;destination_namespace=$ns;parent_path=$parent;destination_title=if($title){$title}else{$p.title};note=$note;status='pending'};$state.decisions+=@($d);Save-State;Write-Host "Saved decision for $($p.title)"}
+$decisionDir=Split-Path $Decisions -Parent;$out=if([string]::IsNullOrWhiteSpace($decisionDir)){'manifest-namespaced.json'}else{Join-Path $decisionDir 'manifest-namespaced.json'};$o=Get-Content $Manifest -Raw|ConvertFrom-Json;$o|Add-Member -Force NoteProperty page_mapping @($state.decisions);$next=((@($m.namespaces)|%{if($_ -is [psobject]){[int]$_.id}else{[int]$_}}|Measure-Object -Maximum).Maximum+2);$o|Add-Member -Force NoteProperty namespace_mapping @($state.decisions|? destination_namespace|select -Expand destination_namespace -Unique|%{[pscustomobject]@{destination_name=$_;destination_id=$next++;create_if_missing=$true}});$o|ConvertTo-Json -Depth 30|Set-Content $out -Encoding utf8;Write-Host "Wrote $out";if($WhatIf){Write-Host 'WhatIf: no wiki writes performed.'}
