@@ -5,7 +5,7 @@ param(
     [Parameter(Mandatory)][string]$Password,
     [Parameter(Mandatory)][string]$LocalSettingsPath,
     [string]$PhpPath = 'php.exe',
-    [switch]$WhatIf
+    [string]$ApacheServiceName = 'MediaWikiApache'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -14,14 +14,14 @@ if (-not (Test-Path -LiteralPath $LocalSettingsPath)) { throw "LocalSettings.php
 
 $marker = '// --- Wholesale Support namespace (managed by migrator) ---'
 $settings = Get-Content -LiteralPath $LocalSettingsPath -Raw
-if (-not $WhatIf -and $settings -notmatch [regex]::Escape($marker)) {
+if (-not $WhatIfPreference -and $settings -notmatch [regex]::Escape($marker)) {
     Add-Content -LiteralPath $LocalSettingsPath -Value @"
 
 $marker
-`$wgExtraNamespaces[100] = 'Wholesale Support';
-`$wgExtraNamespaces[101] = 'Wholesale Support_talk';
-`$wgNamespaceProtection[101] = [ 'edit' => [ 'sysop' ] ];
+`$wgExtraNamespaces[100] = 'Wholesale_Support';
 "@ -Encoding utf8
+    $service = Get-Service -Name $ApacheServiceName -ErrorAction SilentlyContinue
+    if ($service) { Restart-Service -Name $ApacheServiceName -Force; Start-Sleep -Seconds 2 }
 }
 
 $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
@@ -37,6 +37,8 @@ $loginToken = (Invoke-WikiApi @{ action='query'; meta='tokens'; type='login' }).
 $login = Invoke-WikiApi @{ action='login'; lgname=$Username; lgpassword=$Password; lgtoken=$loginToken } -Post
 if ($login.login.result -ne 'Success') { throw 'MediaWiki login failed.' }
 $csrf = (Invoke-WikiApi @{ action='query'; meta='tokens'; type='csrf' }).query.tokens.csrftoken
+$registered = Invoke-WikiApi @{ action='query'; meta='siteinfo'; siprop='namespaces' }
+if (-not $registered.query.namespaces.'100') { throw 'Wholesale Support namespace is not registered by the target wiki.' }
 
 $all = @(); $continue = @{}
 do {
@@ -48,7 +50,13 @@ do {
 } while ($continue.Count)
 
 $map = @{}
-foreach ($p in $all) { $map[$p.title] = "Wholesale Support:$($p.title)" }
+$used = @{}
+foreach ($p in $all) {
+    $base = "Wholesale_Support:$($p.title)"
+    $key = ($base -replace '_',' ').ToLowerInvariant()
+    $used[$key] = 1 + ($used[$key] ?? 0)
+    $map[$p.title] = if ($used[$key] -eq 1) { $base } else { "$base ($($used[$key]))" }
+}
 function Rewrite-Links([string]$Text) {
     [regex]::Replace($Text, '\[\[([^\[\]|#]+)(#[^\]|]*)?(\|[^\]]*)?\]', {
         param($m)
@@ -63,7 +71,7 @@ foreach ($p in $all) {
     $destination = $map[$p.title]
     if ($PSCmdlet.ShouldProcess($p.title, "Move to $destination")) {
         $r = Invoke-WikiApi @{ action='move'; from=$p.title; to=$destination; reason='Organise knowledge pages under Wholesale Support'; token=$moveToken; noredirect='1'; movetalk='0' } -Post
-        if ($r.move.result -ne 'Success') { throw "Move failed for '$($p.title)'." }
+        if (-not $r.move) { throw "Move failed for '$($p.title)': $($r|ConvertTo-Json -Compress)" }
     }
 }
 
@@ -79,13 +87,13 @@ foreach ($p in $all) {
     }
 }
 
-$rootText = "== Wholesale Support ==`n`n[[Wholesale Support:Main Page|Wholesale Support knowledge base]]`n"
+$rootText = "== Wholesale Support ==`n`n[[Wholesale_Support:Main Page|Wholesale Support knowledge base]]`n"
 if ($PSCmdlet.ShouldProcess('Main Page', 'Create namespace index')) {
     Invoke-WikiApi @{ action='edit'; title='Main Page'; text=$rootText; token=$csrf; summary='Create knowledge namespace index' } -Post | Out-Null
 }
 Write-Host "Moved and processed $($all.Count) namespace-0 pages."
 
-if (-not $WhatIf) {
+if (-not $WhatIfPreference) {
     & $PhpPath (Join-Path (Split-Path $LocalSettingsPath) 'maintenance\refreshLinks.php')
     if ($LASTEXITCODE -ne 0) { throw 'refreshLinks.php failed.' }
 }
