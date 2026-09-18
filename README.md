@@ -4,6 +4,8 @@ PowerShell 7 tools to stand up a MediaWiki instance and move content into it: `p
 
 ```powershell
 # 1. Provision a wiki server (see provision/README.md for full options)
+# Config-driven: copy provision/provision.config.example.psd1 to
+# provision.config.psd1, edit it, then run without the wizard/prompts.
 .\provision\provision-mediawiki.ps1 -Action Up
 
 # 2. Migrate content into it (see migrate/README.md for full options)
