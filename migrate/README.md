@@ -1,4 +1,4 @@
-# MediaWiki Migrator
+# Migrate
 
 PowerShell 7 tools for exporting a MediaWiki into an editable manifest and importing it into a blank wiki. No revision history is copied, and imports refuse non-empty targets.
 

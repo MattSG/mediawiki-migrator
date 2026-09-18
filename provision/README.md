@@ -1,4 +1,4 @@
-# mediawiki-provision
+# Provision
 
 One-click PowerShell 7 script that provisions a complete, self-hosted MediaWiki
 instance on a vanilla Windows machine (tested against Windows Server 2016) using
