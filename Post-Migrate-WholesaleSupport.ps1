@@ -5,7 +5,8 @@ param(
     [Parameter(Mandatory)][string]$Password,
     [Parameter(Mandatory)][string]$LocalSettingsPath,
     [string]$PhpPath = 'php.exe',
-    [string]$ApacheServiceName = 'MediaWikiApache'
+    [string]$ApacheServiceName = 'MediaWikiApache',
+    [string]$TargetWikiUrl = 'http://localhost:8090'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -52,19 +53,22 @@ do {
 $map = @{}
 $used = @{}
 foreach ($p in $all) {
-    $base = "Wholesale_Support:$($p.title)"
+    $parent = if ($p.title -match '/') { $p.title.Substring(0, $p.title.LastIndexOf('/')) } else { 'Main Page' }
+    $leaf = if ($p.title -match '/') { $p.title.Substring($p.title.LastIndexOf('/') + 1) } else { $p.title }
+    $base = if ($p.title -eq 'Main Page') { 'Wholesale_Support:Main Page' } else { "Wholesale_Support:$parent/$leaf" }
     $key = ($base -replace '_',' ').ToLowerInvariant()
     $used[$key] = 1 + ($used[$key] ?? 0)
     $map[$p.title] = if ($used[$key] -eq 1) { $base } else { "$base ($($used[$key]))" }
 }
 function Rewrite-Links([string]$Text) {
-    [regex]::Replace($Text, '\[\[([^\[\]|#]+)(#[^\]|]*)?(\|[^\]]*)?\]', {
+    [regex]::Replace($Text, '\[\[\s*([^\[\]|#]+?)\s*(#[^\]|]*)?(?:\|([^\]]*))?\s*\]\]', {
         param($m)
         $target = $m.Groups[1].Value.Trim()
-        if ($map.ContainsKey($target)) { "[[$($map[$target])$($m.Groups[2].Value)$($m.Groups[3].Value)]]" }
+        if ($map.ContainsKey($target)) { $label=$m.Groups[3].Value.Trim(); if (-not $label) { $label=$target }; "[[$($map[$target])$($m.Groups[2].Value)|$label]]" }
         else { $m.Value }
     })
 }
+$oldMain = $all | Where-Object { $_.title -eq 'Main Page' } | Select-Object -First 1
 
 $moveToken = $csrf
 foreach ($p in $all) {
@@ -91,10 +95,26 @@ $rootText = "== Wholesale Support ==`n`n[[Wholesale_Support:Main Page|Wholesale 
 if ($PSCmdlet.ShouldProcess('Main Page', 'Create namespace index')) {
     Invoke-WikiApi @{ action='edit'; title='Main Page'; text=$rootText; token=$csrf; summary='Create knowledge namespace index' } -Post | Out-Null
 }
+if ($oldMain -and $PSCmdlet.ShouldProcess('Wholesale Support:Main Page', 'Restore migrated main page')) {
+    $namespaceMain = Rewrite-Links $oldMain.source
+    Invoke-WikiApi @{ action='edit'; title='Wholesale Support:Main Page'; text=$namespaceMain; token=$csrf; summary='Restore migrated main page in Wholesale Support namespace' } -Post | Out-Null
+}
+if ($PSCmdlet.ShouldProcess('Main Page', 'Purge parser cache')) {
+    Invoke-WikiApi @{ action='purge'; titles='Main Page' } -Post | Out-Null
+}
 Write-Host "Moved and processed $($all.Count) namespace-0 pages."
 
 if (-not $WhatIfPreference) {
+    $smwRebuild = Join-Path (Split-Path $LocalSettingsPath) 'extensions\SemanticMediaWiki\maintenance\rebuildData.php'
+    if (Test-Path -LiteralPath $smwRebuild) {
+        & $PhpPath $smwRebuild
+        if ($LASTEXITCODE -ne 0) { throw 'SemanticMediaWiki rebuildData.php failed.' }
+    }
     & $PhpPath (Join-Path (Split-Path $LocalSettingsPath) 'maintenance\refreshLinks.php')
     if ($LASTEXITCODE -ne 0) { throw 'refreshLinks.php failed.' }
+    & $PhpPath (Join-Path (Split-Path $LocalSettingsPath) 'maintenance\rebuildFileCache.php') --all --overwrite --server $TargetWikiUrl
+    if ($LASTEXITCODE -ne 0) { throw 'rebuildFileCache.php failed.' }
+    & $PhpPath (Join-Path (Split-Path $LocalSettingsPath) 'maintenance\runJobs.php') --maxjobs 100
+    if ($LASTEXITCODE -ne 0) { throw 'runJobs.php failed.' }
 }
 Write-Host 'Wholesale Support post-migration complete.'
